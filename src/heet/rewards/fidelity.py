@@ -25,3 +25,18 @@ def exact_match(a: str, b: str) -> float:
 
 def chrf(hyp: str, ref: str) -> float:
     return _CHRF.sentence_score(hyp, [ref]).score / 100.0
+
+
+class SentenceEmbedder:
+    def __init__(self, name: str, device: str = "cpu", batch_size: int = 64):
+        from sentence_transformers import SentenceTransformer
+
+        self.model = SentenceTransformer(name, device=device)
+        self.batch_size = batch_size
+
+    def similarity(self, a: list[str], b: list[str]) -> list[float]:
+        if not a:
+            return []
+        ea = self.model.encode(a, batch_size=self.batch_size, normalize_embeddings=True, convert_to_tensor=True)
+        eb = self.model.encode(b, batch_size=self.batch_size, normalize_embeddings=True, convert_to_tensor=True)
+        return (ea * eb).sum(dim=-1).clamp(-1.0, 1.0).tolist()
