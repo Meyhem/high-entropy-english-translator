@@ -1,5 +1,5 @@
-data/
-runs/
+/data/
+/runs/
 .venv/
 __pycache__/
 *.egg-info/
