@@ -147,3 +147,15 @@ def test_run_ei_existing_run_needs_overwrite(tmp_path):
     cfg.paths.runs_dir = str(tmp_path)
     with pytest.raises(FileExistsError, match="--overwrite"):
         run_ei(cfg, run="r2", init="init")
+
+
+@pytest.mark.parametrize("run", ["init/", "./init", "init/sub"])
+def test_run_ei_refuses_run_dir_overlapping_init(tmp_path, run):
+    from heet.training.expert_iter import run_ei
+
+    _fake_init(tmp_path)
+    cfg = Config()
+    cfg.paths.runs_dir = str(tmp_path)
+    with pytest.raises(ValueError, match="init"):
+        run_ei(cfg, run=run, init="init", overwrite=True)
+    assert (tmp_path / "init" / "adapters" / "compressor" / "adapter_config.json").exists()

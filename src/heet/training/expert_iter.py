@@ -162,6 +162,9 @@ def run_ei(cfg: Config, run: str, init: str, rounds: int | None = None, overwrit
     check_adapter_dir("compressor", comp_dir)
     check_adapter_dir("decompressor", decomp_dir)
     run_dir = Path(cfg.paths.runs_dir) / run
+    run_abs, init_abs = run_dir.resolve(), (Path(cfg.paths.runs_dir) / init).resolve()
+    if run_abs.is_relative_to(init_abs) or init_abs.is_relative_to(run_abs):
+        raise ValueError(f"--run {run!r} overlaps the init run {init!r}; the init run is never modified")
     if run_dir.exists() and any(run_dir.iterdir()):
         if not overwrite:
             raise FileExistsError(f"{run_dir} already exists; pick another --run or pass --overwrite")
