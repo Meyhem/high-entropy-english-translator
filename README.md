@@ -13,6 +13,7 @@ uv run heet gen-data --limit 20000          # data/chunks.jsonl, data/pairs.json
 uv run heet sft --task decompress --run r1  # runs/r1/adapters/decompressor
 uv run heet sft --task compress --run r1    # runs/r1/adapters/compressor
 uv run heet eval --run r1                   # runs/r1/metrics.jsonl, runs/r1/samples/
+uv run heet compress --run r1 "Some text."  # --mode decompress|roundtrip; reads stdin lines if no text
 uv run tensorboard --logdir runs/
 ```
 

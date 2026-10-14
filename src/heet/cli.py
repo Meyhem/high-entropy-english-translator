@@ -33,6 +33,12 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--run", required=True)
     e.add_argument("--split", choices=["val", "test"], default="test")
     e.add_argument("--limit", type=int, default=None)
+
+    c = sub.add_parser("compress", help="compress / decompress / round-trip your own text")
+    _common(c)
+    c.add_argument("--run", required=True)
+    c.add_argument("--mode", choices=["compress", "decompress", "roundtrip"], default="compress")
+    c.add_argument("text", nargs="*", help="input texts; reads one per line from stdin if omitted")
     return parser
 
 
@@ -51,6 +57,10 @@ def main(argv: list[str] | None = None) -> int:
         from heet.eval.evaluate import run_eval
 
         run_eval(cfg, run=args.run, split=args.split, limit=args.limit)
+    elif args.command == "compress":
+        from heet.infer import run_compress
+
+        run_compress(cfg, run=args.run, texts=args.text or sys.stdin.read().splitlines(), mode=args.mode)
     return 0
 
 
