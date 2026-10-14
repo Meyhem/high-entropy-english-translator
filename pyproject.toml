@@ -1,0 +1,44 @@
+[project]
+name = "heet"
+version = "0.1.0"
+description = "High-entropy English translator: dense-English text autoencoder"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "torch>=2.14",
+    "transformers>=5.19,<6",
+    "peft>=0.21,<0.22",
+    "trl>=1.15,<2",
+    "accelerate>=1.15",
+    "datasets>=5.1",
+    "sentence-transformers>=6.1",
+    "sacrebleu>=2.6",
+    "httpx>=0.28",
+    "tensorboard>=2.21",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+heet = "heet.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=9.1"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/heet"]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu130" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: needs network (HF downloads) and/or several minutes"]
+addopts = "-m 'not slow'"

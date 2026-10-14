@@ -1,0 +1,50 @@
+paths:
+  data_dir: data
+  runs_dir: runs
+corpus:
+  source: wikitext
+  min_chars: 40
+  max_chars: 300
+  max_sentences: 3
+  max_chunks: 200000
+  val_frac: 0.01
+  test_frac: 0.01
+teacher:
+  base_url: http://localhost:11434
+  model: qwen3:14b
+  concurrency: 4
+  max_retries: 3
+filter:
+  min_similarity: 0.90
+  min_ratio: 0.30
+  max_ratio: 0.80
+  near_copy: 0.9
+model:
+  name: Qwen/Qwen3-0.6B
+  dtype: bfloat16
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+sft:
+  lr: 0.0002
+  epochs: 2
+  per_device_batch_size: 16
+  grad_accum: 2
+  max_length: 256
+  eval_steps: 200
+reward:
+  embedder: sentence-transformers/all-mpnet-base-v2
+  w_sim: 1.0
+  w_exact: 0.2
+  w_chrf: 0.0
+  w_char: 0.5
+  w_bits: 0.25
+  w_read: 0.5
+  margin: 0.6931471805599453
+eval:
+  callback_n: 64
+  n_samples: 32
+  worst_k: 10
+  target_char_ratio: 0.55
+  target_sim: 0.90
