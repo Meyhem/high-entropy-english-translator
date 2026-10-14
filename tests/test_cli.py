@@ -19,3 +19,17 @@ def test_parser_compress():
     assert p.parse_args(["compress", "--run", "r1", "--mode", "roundtrip"]).text == []
     with pytest.raises(SystemExit):
         p.parse_args(["compress", "--run", "r1", "--mode", "bogus"])
+
+
+def test_parser_ei():
+    p = build_parser()
+    a = p.parse_args(["ei", "--run", "r2", "--init", "r1", "--rounds", "2"])
+    assert (a.command, a.run, a.init, a.rounds, a.overwrite) == ("ei", "r2", "r1", 2, False)
+    assert p.parse_args(["ei", "--run", "r2", "--init", "r1"]).rounds is None
+
+
+def test_ei_same_run_and_init_rejected():
+    from heet.cli import main
+
+    with pytest.raises(SystemExit):
+        main(["ei", "--run", "r1", "--init", "r1"])

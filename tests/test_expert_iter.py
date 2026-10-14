@@ -119,3 +119,31 @@ def test_run_round_without_winners_does_not_train(tmp_path, fake_gen):
     sel = run_round(None, None, Config(), PAIRS, ShortIsBetterScorer(sim=0.5), 1, tmp_path,
                     MetricsLogger(tmp_path), trained.append)
     assert sel.winners == [] and trained == []
+
+
+def _fake_init(tmp_path):
+    for name in ("compressor", "decompressor"):
+        d = tmp_path / "init" / "adapters" / name
+        d.mkdir(parents=True)
+        (d / "adapter_config.json").write_text("{}")
+
+
+def test_run_ei_missing_init_fails_fast(tmp_path):
+    from heet.training.expert_iter import run_ei
+
+    cfg = Config()
+    cfg.paths.runs_dir = str(tmp_path)
+    with pytest.raises(FileNotFoundError, match="heet sft"):
+        run_ei(cfg, run="r2", init="nope")
+
+
+def test_run_ei_existing_run_needs_overwrite(tmp_path):
+    from heet.training.expert_iter import run_ei
+
+    _fake_init(tmp_path)
+    (tmp_path / "r2").mkdir()
+    (tmp_path / "r2" / "metrics.jsonl").write_text("")
+    cfg = Config()
+    cfg.paths.runs_dir = str(tmp_path)
+    with pytest.raises(FileExistsError, match="--overwrite"):
+        run_ei(cfg, run="r2", init="init")

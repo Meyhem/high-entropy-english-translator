@@ -39,11 +39,21 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--run", required=True)
     c.add_argument("--mode", choices=["compress", "decompress", "roundtrip"], default="compress")
     c.add_argument("text", nargs="*", help="input texts; reads one per line from stdin if omitted")
+
+    x = sub.add_parser("ei", help="stage 3: expert iteration on the compressor")
+    _common(x)
+    x.add_argument("--run", required=True, help="new run dir for stage 3 outputs")
+    x.add_argument("--init", required=True, help="stage 2 run whose adapters to start from")
+    x.add_argument("--rounds", type=int, default=None, help="overrides ei.rounds")
+    x.add_argument("--overwrite", action="store_true", help="delete an existing --run dir first")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.command == "ei" and args.run == args.init:
+        parser.error("--run must differ from --init (the init run is never modified)")
     cfg = load_config(args.config, args.overrides)
     if args.command == "gen-data":
         from heet.data.generate import run_gen_data
@@ -61,6 +71,10 @@ def main(argv: list[str] | None = None) -> int:
         from heet.infer import run_compress
 
         run_compress(cfg, run=args.run, texts=args.text or sys.stdin.read().splitlines(), mode=args.mode)
+    elif args.command == "ei":
+        from heet.training.expert_iter import run_ei
+
+        run_ei(cfg, run=args.run, init=args.init, rounds=args.rounds, overwrite=args.overwrite)
     return 0
 
 

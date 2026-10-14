@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import random
+import shutil
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -13,6 +15,8 @@ from heet.eval.evaluate import _mean
 from heet.jsonl import write_jsonl
 from heet.models.loading import generate, generate_samples, use_adapter
 from heet.rewards.combined import RewardBreakdown
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -136,3 +140,69 @@ def run_round(model, tokenizer, cfg: Config, pairs: list[dict], scorer, round_id
     logger.log(round_idx, {**sel.stats, "sample_s": t1 - t0, "score_s": t2 - t1, "train_s": t3 - t2},
                prefix="ei/", split="train", source="ei")
     return sel
+
+
+def save_compressor(model, tokenizer, root: Path) -> None:
+    model.save_pretrained(str(root), selected_adapters=["compressor"])
+    tokenizer.save_pretrained(str(Path(root) / "compressor"))
+
+
+def run_ei(cfg: Config, run: str, init: str, rounds: int | None = None, overwrite: bool = False) -> Path:
+    import torch
+    from peft import PeftModel
+
+    from heet.config import dump_config
+    from heet.eval.evaluate import build_scorer, load_split_pairs
+    from heet.eval.logger import MetricsLogger
+    from heet.models.loading import adapter_dir, check_adapter_dir, load_base, load_tokenizer
+    from heet.training.sft import EvalCallback, select_val_pairs, train_adapter
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    comp_dir, decomp_dir = adapter_dir(cfg, init, "compressor"), adapter_dir(cfg, init, "decompressor")
+    check_adapter_dir("compressor", comp_dir)
+    check_adapter_dir("decompressor", decomp_dir)
+    run_dir = Path(cfg.paths.runs_dir) / run
+    if run_dir.exists() and any(run_dir.iterdir()):
+        if not overwrite:
+            raise FileExistsError(f"{run_dir} already exists; pick another --run or pass --overwrite")
+        shutil.rmtree(run_dir)
+    n_rounds = rounds if rounds is not None else cfg.ei.rounds
+    dump_config(cfg, run_dir / "config_ei.yaml")
+
+    train_pairs = load_split_pairs(cfg, "train", None)
+    val_pairs = select_val_pairs(cfg)
+    tokenizer = load_tokenizer(cfg.model.name)
+    model = PeftModel.from_pretrained(load_base(cfg.model), str(comp_dir), adapter_name="compressor",
+                                      is_trainable=True)
+    model.load_adapter(str(decomp_dir), adapter_name="decompressor", is_trainable=False)
+    model.set_adapter("compressor")
+    shutil.copytree(decomp_dir, run_dir / "adapters" / "decompressor")
+
+    scorer = build_scorer(model, tokenizer, cfg)
+    logger = MetricsLogger(run_dir)
+    evaluator = EvalCallback(cfg, "compress", tokenizer, val_pairs, scorer, logger, run_dir,
+                             has_decompressor=True, source="ei", sample_tag="ei_val_")
+    if val_pairs:
+        evaluator.evaluate(model, 0)
+    save_compressor(model, tokenizer, run_dir / "adapters")  # round 0 = init weights until a round trains
+
+    for r in range(1, n_rounds + 1):
+        torch.manual_seed(cfg.ei.seed + r)
+        subset = round_subset(train_pairs, cfg.ei.n_per_round, cfg.ei.seed + r)
+        sel = run_round(
+            model, tokenizer, cfg, subset, scorer, r, run_dir, logger,
+            train_fn=lambda winners, r=r: train_adapter(
+                model, tokenizer, cfg, winners, "compress", run_dir,
+                lr=cfg.ei.lr, epochs=cfg.ei.epochs, tag=f"ei_round_{r}"),
+        )
+        log.info("round %d: %d/%d winners, mean gain %.3f", r, sel.stats["n_winners"],
+                 sel.stats["n_originals"], sel.stats["mean_gain"])
+        if not sel.winners:
+            log.warning("round %d produced no winners; stopping early", r)
+            break
+        if val_pairs:
+            evaluator.evaluate(model, r)
+        save_compressor(model, tokenizer, run_dir / "rounds" / str(r))
+        save_compressor(model, tokenizer, run_dir / "adapters")
+    logger.close()
+    return run_dir / "adapters" / "compressor"
