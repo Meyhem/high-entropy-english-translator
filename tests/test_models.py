@@ -55,3 +55,16 @@ def test_ref_lm_on_peft_model_matches_base(tok):
     peft_score = RefLM(m, tok).score(["The cat sat on the mat."])[0]
     assert peft_score.n_tokens == plain.n_tokens
     assert abs(peft_score.nll_nats - plain.nll_nats) < 1e-4
+
+
+@pytest.mark.parametrize("k", [1, 3])
+def test_generate_samples_groups_per_input(tok, k):
+    from heet.models.loading import generate_samples
+
+    base = load_base(ModelConfig(name=TINY, dtype="float32", device="cpu"))
+    texts = ["Hello there.", "A second, longer sentence.", "Third."]
+    gen = GenerationConfig(batch_size=4, max_new_tokens_factor=0.0, max_new_tokens_extra=4)
+    torch.manual_seed(0)
+    out = generate_samples(base, tok, "compress", texts, gen, num_samples=k, temperature=0.8, top_p=0.95)
+    assert len(out) == len(texts)
+    assert all(len(group) == k and all(isinstance(s, str) for s in group) for group in out)

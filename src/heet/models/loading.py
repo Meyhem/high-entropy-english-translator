@@ -80,8 +80,9 @@ def use_adapter(model: PeftModel, name: str):
         model.set_adapter(previous, inference_mode=not was_trainable)
 
 
-@torch.no_grad()
-def generate(model, tokenizer, task: str, texts: list[str], gen: GenerationConfig) -> list[str]:
+def _batched_generate(model, tokenizer, task: str, texts: list[str], gen: GenerationConfig,
+                      prompts_per_batch: int, **gen_kwargs) -> list[str]:
+    """Flat list of cleaned outputs; with num_return_sequences=k the k outputs of each input are adjacent."""
     was_training = model.training
     model.eval()
     old_side = tokenizer.padding_side
@@ -89,18 +90,13 @@ def generate(model, tokenizer, task: str, texts: list[str], gen: GenerationConfi
     device = next(model.parameters()).device
     outputs: list[str] = []
     try:
-        for start in range(0, len(texts), gen.batch_size):
-            batch = texts[start : start + gen.batch_size]
+        for start in range(0, len(texts), prompts_per_batch):
+            batch = texts[start : start + prompts_per_batch]
             prompts = [render_prompt(tokenizer, task, t) for t in batch]
             enc = tokenizer(prompts, return_tensors="pt", padding=True, add_special_tokens=False).to(device)
             longest_input = max(len(ids) for ids in tokenizer(batch, add_special_tokens=False)["input_ids"])
             max_new = int(gen.max_new_tokens_factor * longest_input) + gen.max_new_tokens_extra
-            out = model.generate(
-                **enc,
-                max_new_tokens=max_new,
-                do_sample=False,
-                pad_token_id=tokenizer.pad_token_id,
-            )
+            out = model.generate(**enc, max_new_tokens=max_new, pad_token_id=tokenizer.pad_token_id, **gen_kwargs)
             new_tokens = out[:, enc["input_ids"].shape[1] :]
             for seq in tokenizer.batch_decode(new_tokens, skip_special_tokens=True):
                 outputs.append(clean_output(seq))
@@ -109,3 +105,20 @@ def generate(model, tokenizer, task: str, texts: list[str], gen: GenerationConfi
         if was_training:
             model.train()
     return outputs
+
+
+@torch.no_grad()
+def generate(model, tokenizer, task: str, texts: list[str], gen: GenerationConfig) -> list[str]:
+    return _batched_generate(model, tokenizer, task, texts, gen, gen.batch_size, do_sample=False)
+
+
+@torch.no_grad()
+def generate_samples(model, tokenizer, task: str, texts: list[str], gen: GenerationConfig,
+                     num_samples: int, temperature: float, top_p: float) -> list[list[str]]:
+    # fewer prompts per batch so batch_size bounds the number of sequences in flight
+    flat = _batched_generate(
+        model, tokenizer, task, texts, gen, max(1, gen.batch_size // num_samples),
+        do_sample=True, temperature=temperature, top_p=top_p, top_k=0,  # top_k=0 overrides Qwen's default 20
+        num_return_sequences=num_samples,
+    )
+    return [flat[i * num_samples : (i + 1) * num_samples] for i in range(len(texts))]
