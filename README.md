@@ -53,6 +53,17 @@ flowchart LR
 
 Under the hood, an adapter adds a small, trainable correction to every major internal layer of the model. Only those corrections are trained, which is why training fits on a single consumer graphics card.
 
+Here's what that looks like inside one layer:
+
+![LoRA: the frozen layer W plus a small A→B bypass](docs/images/lora.svg)
+
+- The input (1,024 numbers) goes through two paths at once.
+- **Top:** the original layer `W`. It holds Qwen's knowledge and never changes.
+- **Bottom:** the adapter. `A` squeezes the input down to 16 numbers, and `B` expands them back to 1,024. The result is a small nudge.
+- The two are added together: "what Qwen would do, plus our nudge."
+
+`A` and `B` start out doing nothing (`B` is all zeros) and are the only numbers that train. Every one of the model's 196 main projections (7 per layer × 28 layers) gets its own `A`/`B` pair, and the compressor and decompressor each have their own set. Turning an adapter off just removes the bottom path, which gives back the original model exactly.
+
 ### Where the training examples come from
 
 A model learns by example, so the examples have to come from somewhere. heet borrows a bigger, smarter model (the **teacher**, `qwen3:14b`, run locally with [Ollama](https://ollama.com)) to make them:
