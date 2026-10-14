@@ -83,9 +83,20 @@ Each round trip gets a score made from three questions:
 |---|---|---|
 | Is the meaning preserved? | A separate meaning-comparison model rates how similar the original and the round-trip result are (0–1). | ≥ 0.90 |
 | Is it actually shorter? | Dense length ÷ original length. | ≤ 0.55 |
-| Is it still readable? | The plain model, with no adapters, judges how "surprising" the dense text looks compared with normal English. Readable shorthand is a little surprising. Gibberish is very surprising. | at most ~2× as surprising |
+| Is it still readable? | The plain model, with no adapters, judges how "surprising" the dense text looks compared with normal English. Readable shorthand is a little surprising. Gibberish is very surprising. | at most ~5× as surprising (about the teacher's own level) |
 
-These scores are written so that a future training stage can use them directly as a reward ("do more of what scores well").
+These scores combine into a single reward, which the next stage uses directly ("do more of what scores well").
+
+### Beating the teacher (stage 3)
+
+By copying the teacher, the compressor can at best become as good as the teacher. Stage 3 (**expert iteration**) lets it learn from its own attempts instead:
+
+1. For each of ~1,000 training passages, the compressor writes 8 different dense versions, plus its usual best guess. The teacher's version joins as a 10th candidate.
+2. Every candidate goes through the (frozen) decompressor and gets the round-trip score.
+3. The best candidate wins, but only if it keeps the meaning (similarity ≥ 0.90) and clearly beats the compressor's usual output.
+4. The compressor trains briefly on the winners, then the whole thing repeats (3 rounds by default).
+
+The decompressor stays frozen as a fixed judge, so the compressor can't drift into a private code that only a co-trained decompressor understands.
 
 ### Known limits
 
@@ -112,6 +123,8 @@ uv run heet sft --task decompress --run r1  # train the decompressor
 uv run heet sft --task compress --run r1    # train the compressor
 uv run heet eval --run r1                   # score round trips on held-out text
 uv run heet compress --run r1 "Some text."  # try it yourself
+uv run heet ei --run r2 --init r1           # stage 3: improve the compressor → runs/r2/
+uv run heet eval --run r2                   # compare against r1
 uv run tensorboard --logdir runs/           # training charts in your browser
 ```
 
@@ -151,5 +164,5 @@ uv run heet sft --task compress --run r2 --set model.name=Qwen/Qwen3-1.7B --set 
 ## For developers
 
 - Tests: `uv run pytest` (fast) and `uv run pytest -m slow` (downloads tiny models).
-- Full design: [`docs/superpowers/specs/2026-10-14-dense-english-autoencoder-design.md`](docs/superpowers/specs/2026-10-14-dense-english-autoencoder-design.md).
+- Full design: [`docs/superpowers/specs/2026-10-14-dense-english-autoencoder-design.md`](docs/superpowers/specs/2026-10-14-dense-english-autoencoder-design.md); stage 3: [`docs/superpowers/specs/2026-10-14-stage3-expert-iteration-design.md`](docs/superpowers/specs/2026-10-14-stage3-expert-iteration-design.md).
 - Code tour: `src/heet/data/` makes examples, `training/` trains adapters, `rewards/` scores, `eval/` evaluates, `models/loading.py` loads the model and swaps adapters.

@@ -11,14 +11,14 @@ HEET — dense-English text autoencoder. Qwen3 base (frozen) + two LoRA adapters
 ## Commands
 
 - `uv run pytest` — fast tests; `uv run pytest -m slow` downloads tiny models.
-- `uv run heet gen-data | sft | eval | compress` — see `README.md`.
-- Stage order: `gen-data` → `sft --task decompress` → `sft --task compress` → `eval`.
+- `uv run heet gen-data | sft | eval | compress | ei` — see `README.md`.
+- Stage order: `gen-data` → `sft --task decompress` → `sft --task compress` → `eval` → `ei --run r2 --init r1` → `eval --run r2`.
 
 ## Code layout
 
 - `src/heet/cli.py` — argparse entry; heavy imports are lazy inside each command branch.
 - `src/heet/models/loading.py` — base model, named adapters, `use_adapter`, batched `generate`.
-- `src/heet/rewards/` — pure scoring (no training imports); reusable by a future stage 3 (RL).
+- `src/heet/rewards/` — pure scoring (no training imports); reused as the stage 3 reward (`training/expert_iter.py`).
 - Config lives in `configs/default.yaml`; override with `--set section.key=value`.
 - Tests use stubs in `tests/stubs.py` instead of real models where possible.
 
