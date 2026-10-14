@@ -52,3 +52,14 @@ def test_callback_decompress_task(tmp_path, monkeypatch):
                       MetricsLogger(tmp_path), tmp_path, has_decompressor=True)
     m = cb.evaluate(EchoModel(), step=1)
     assert m["sim"] == 1.0 and m["exact_rate"] == 1.0
+
+
+def test_select_val_pairs_empty_warns(tmp_path, caplog):
+    from heet.jsonl import write_jsonl
+    from heet.training.sft import select_val_pairs
+
+    cfg = Config()
+    cfg.paths.data_dir = str(tmp_path)
+    write_jsonl(tmp_path / "pairs.jsonl", [{"id": "a", "split": "train", "original": "x", "dense": "y"}])
+    assert select_val_pairs(cfg) == []
+    assert any("no 'val' pairs" in r.message for r in caplog.records)

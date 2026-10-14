@@ -82,17 +82,23 @@ def teacher_reconstruct_messages(dense: str) -> list[dict[str, str]]:
 
 _THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
 _FENCE = re.compile(r"^\s*```[a-zA-Z]*\s*$", re.MULTILINE)
-_LABEL = re.compile(r"^(dense|rewrite|reconstruction|output|original|text|expanded)\s*:\s*", re.I)
+_LABEL = re.compile(
+    r"^\**\s*(dense|rewrite|reconstruction|output|original|text|expanded)\s*:\s*\**\s*", re.I
+)
 _QUOTES = ('"', "'", "“", "”")
 
 
-def clean_output(text: str) -> str:
-    text = _THINK.sub("", text).strip()
-    text = _FENCE.sub("", text).strip()
-    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
-    text = paragraphs[0] if paragraphs else ""
-    text = " ".join(text.split())
-    text = _LABEL.sub("", text)
+def _strip_quotes(text: str) -> str:
     if len(text) >= 2 and text[0] in _QUOTES and text[-1] in _QUOTES:
-        text = text[1:-1].strip()
+        return text[1:-1].strip()
     return text
+
+
+def clean_output(text: str) -> str:
+    """Keep only the answer line: outputs are single-line by prompt, so later lines are commentary."""
+    text = _FENCE.sub("", _THINK.sub("", text))
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if len(lines) > 1 and lines[0].endswith(":"):
+        lines = lines[1:]  # preamble such as "Here is the rewrite:"
+    text = " ".join(lines[0].split()) if lines else ""
+    return _strip_quotes(_LABEL.sub("", _strip_quotes(text)))

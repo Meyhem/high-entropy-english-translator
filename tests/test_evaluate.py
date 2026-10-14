@@ -44,3 +44,14 @@ def test_eval_missing_adapter(tmp_path):
     cfg.paths.data_dir = str(tmp_path / "data")
     with pytest.raises(FileNotFoundError, match="heet sft --task"):
         run_eval(cfg, run="r1", split="test", limit=2)
+
+
+def test_load_split_pairs_message_reports_counts(tmp_path):
+    from heet.eval.evaluate import load_split_pairs
+    from heet.jsonl import write_jsonl
+
+    cfg = Config()
+    cfg.paths.data_dir = str(tmp_path)
+    write_jsonl(tmp_path / "pairs.jsonl", [{"id": "a", "split": "train"}, {"id": "b", "split": "train"}])
+    with pytest.raises(FileNotFoundError, match=r"train=2.*corpus.val_frac"):
+        load_split_pairs(cfg, "val", None)

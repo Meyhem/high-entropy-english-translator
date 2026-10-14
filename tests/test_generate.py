@@ -144,3 +144,17 @@ def test_chat_sends_think_false():
     assert asyncio.run(client.chat([{"role": "user", "content": "hi"}], temperature=0.3)) == "ok"
     assert seen["think"] is False and seen["stream"] is False
     assert seen["options"]["temperature"] == 0.3
+
+
+def test_teacher_error_retried_on_resume(cfg, tmp_path):
+    asyncio.run(generate_pairs(_chunks(1), FakeClient("", fail=True), StubEmbedder(), cfg, limit=None))
+    assert read_jsonl(tmp_path / "rejected.jsonl")[0]["reason"] == "teacher_error"
+    counts = asyncio.run(generate_pairs(_chunks(1), FakeClient("Gov: bridge ($40M) opens March 2021."),
+                                        StubEmbedder(), cfg, limit=None))
+    assert counts == {"accepted": 1, "rejected": 0, "skipped": 0}
+
+
+def test_consecutive_teacher_errors_abort(cfg):
+    cfg.teacher.concurrency = 1
+    with pytest.raises(TeacherUnavailable, match="consecutive"):
+        asyncio.run(generate_pairs(_chunks(50), FakeClient("", fail=True), StubEmbedder(), cfg, limit=None))

@@ -12,13 +12,14 @@ import httpx
 
 from heet.config import Config, FilterConfig
 from heet.data.corpus import build_chunks
-from heet.data.llm_client import ChatClient, OllamaClient
+from heet.data.llm_client import ChatClient, OllamaClient, TeacherUnavailable
 from heet.jsonl import append_jsonl, read_jsonl
 from heet.prompts import clean_output, teacher_reconstruct_messages, teacher_rewrite_messages
 from heet.rewards.fidelity import Embedder, normalize
 
 log = logging.getLogger(__name__)
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
+MAX_CONSECUTIVE_TEACHER_ERRORS = 10
 
 
 def cheap_checks(original: str, dense: str, cfg: FilterConfig) -> str | None:
@@ -68,17 +69,28 @@ async def process_chunk(chunk: dict, client: ChatClient, embedder: Embedder, cfg
 async def generate_pairs(chunks, client: ChatClient, embedder: Embedder, cfg: Config, limit: int | None):
     data = Path(cfg.paths.data_dir)
     pairs_path, rejected_path = data / "pairs.jsonl", data / "rejected.jsonl"
-    done = {r["id"] for r in read_jsonl(pairs_path)} | {r["id"] for r in read_jsonl(rejected_path)}
+    # teacher_error rejections are transient (outage, OOM) and get retried on resume
+    done = {r["id"] for r in read_jsonl(pairs_path)} | {
+        r["id"] for r in read_jsonl(rejected_path) if r.get("reason") != "teacher_error"
+    }
     todo = [c for c in chunks if c["id"] not in done]
     skipped = len(chunks) - len(todo)
     if limit is not None:
         todo = todo[:limit]
     counts = {"accepted": 0, "rejected": 0, "skipped": skipped}
     sem = asyncio.Semaphore(cfg.teacher.concurrency)
+    consecutive_errors = 0
 
     async def one(chunk):
+        nonlocal consecutive_errors
         async with sem:
             rec, reason = await process_chunk(chunk, client, embedder, cfg)
+        consecutive_errors = consecutive_errors + 1 if reason == "teacher_error" else 0
+        if consecutive_errors >= MAX_CONSECUTIVE_TEACHER_ERRORS:
+            raise TeacherUnavailable(
+                f"{consecutive_errors} consecutive teacher errors from {cfg.teacher.base_url}; "
+                "check `ollama serve`, then re-run to resume (failed chunks are retried)"
+            )
         if reason is None:
             append_jsonl(pairs_path, rec)
             counts["accepted"] += 1

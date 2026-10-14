@@ -32,6 +32,17 @@ def build_examples(pairs: list[dict], task: str, tokenizer) -> list[dict]:
     return out
 
 
+def select_val_pairs(cfg: Config) -> list[dict]:
+    """Fixed val subset for the eval callback; empty (callback disabled) if there are no val pairs."""
+    try:
+        pairs = load_split_pairs(cfg, "val", None)
+    except FileNotFoundError as e:
+        log.warning("%s; training without the eval callback", e)
+        return []
+    random.Random(cfg.sft.seed).shuffle(pairs)
+    return pairs[: cfg.eval.callback_n]
+
+
 class EvalCallback(TrainerCallback):
     def __init__(self, cfg: Config, task: str, tokenizer, pairs: list[dict], scorer: Scorer,
                  logger: MetricsLogger, run_dir: Path, has_decompressor: bool):
@@ -97,9 +108,7 @@ def run_sft(cfg: Config, task: str, run: str, limit: int | None) -> Path:
     dump_config(cfg, run_dir / f"config_{task}.yaml")
 
     train_pairs = load_split_pairs(cfg, "train", limit)
-    val_pairs = load_split_pairs(cfg, "val", None)
-    random.Random(cfg.sft.seed).shuffle(val_pairs)
-    val_pairs = val_pairs[: cfg.eval.callback_n]
+    val_pairs = select_val_pairs(cfg)
 
     tokenizer = load_tokenizer(cfg.model.name)
     model = new_lora(load_base(cfg.model), cfg.lora, adapter)
@@ -116,8 +125,10 @@ def run_sft(cfg: Config, task: str, run: str, limit: int | None) -> Path:
             log.warning("%s", e)
 
     logger = MetricsLogger(run_dir)
-    callback = EvalCallback(cfg, task, tokenizer, val_pairs, build_scorer(model, tokenizer, cfg),
-                            logger, run_dir, has_decompressor)
+    callbacks = []
+    if val_pairs:
+        callbacks.append(EvalCallback(cfg, task, tokenizer, val_pairs, build_scorer(model, tokenizer, cfg),
+                                      logger, run_dir, has_decompressor))
     # transformers 5 reads the TensorBoard dir for trainer loss curves from this env var
     os.environ["TENSORBOARD_LOGGING_DIR"] = str(run_dir / "tb" / f"trainer_{task}")
     s = cfg.sft
@@ -145,7 +156,7 @@ def run_sft(cfg: Config, task: str, run: str, limit: int | None) -> Path:
         args=args,
         train_dataset=Dataset.from_list(build_examples(train_pairs, task, tokenizer)),
         processing_class=tokenizer,
-        callbacks=[callback],
+        callbacks=callbacks,
     )
     trainer.train()
     out_root = run_dir / "adapters"

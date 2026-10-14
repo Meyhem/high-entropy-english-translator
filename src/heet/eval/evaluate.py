@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import Counter
 from pathlib import Path
 
 from heet.config import Config
@@ -76,9 +77,15 @@ def round_trip(model, tokenizer, originals: list[str], cfg: Config):
 
 def load_split_pairs(cfg: Config, split: str, limit: int | None) -> list[dict]:
     path = Path(cfg.paths.data_dir) / "pairs.jsonl"
-    rows = [r for r in read_jsonl(path) if r["split"] == split]
+    all_rows = read_jsonl(path)
+    rows = [r for r in all_rows if r["split"] == split]
     if not rows:
-        raise FileNotFoundError(f"no '{split}' pairs in {path}; run `heet gen-data` first")
+        counts = Counter(r["split"] for r in all_rows)
+        found = ", ".join(f"{k}={counts.get(k, 0)}" for k in ("train", "val", "test"))
+        raise FileNotFoundError(
+            f"no '{split}' pairs in {path} (found {found}); run `heet gen-data` with a larger "
+            "--limit or raise corpus.val_frac / corpus.test_frac"
+        )
     return rows[:limit] if limit else rows
 
 

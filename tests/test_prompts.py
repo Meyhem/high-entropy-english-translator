@@ -38,6 +38,11 @@ def test_teacher_messages_contain_rules_and_text():
         ("cat sat on mat\n\nNote: I removed articles.", "cat sat on mat"),
         ("Reconstruction: The cat sat.", "The cat sat."),
         ("   ", ""),
+        ("Gov announced bridge.\nNote: I dropped articles.", "Gov announced bridge."),
+        ("Gov bridge.\n(Note: abbreviated)", "Gov bridge."),
+        ("Here is the rewrite:\nGov bridge.", "Gov bridge."),
+        ('"Dense: Gov bridge"', "Gov bridge"),
+        ("**Dense:** Gov bridge", "Gov bridge"),
     ],
 )
 def test_clean_output(raw, expected):
