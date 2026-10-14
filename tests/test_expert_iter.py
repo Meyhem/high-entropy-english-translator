@@ -1,5 +1,10 @@
+import contextlib
+
 import pytest
 
+from heet.config import Config
+from heet.eval.logger import MetricsLogger
+from heet.jsonl import read_jsonl
 from heet.rewards.combined import RewardBreakdown
 from heet.training.expert_iter import Candidate, build_candidates, round_subset, select_winners
 
@@ -63,3 +68,54 @@ def test_select_teacher_can_win():
     cands = [scored("g", 0.1, greedy=True), scored("t", 0.5, teacher=True)]
     sel = select_winners([P], [cands], min_sim=0.9, min_gain=0.02)
     assert sel.winners[0]["teacher"] is True and sel.stats["winner_from_teacher"] == 1.0
+
+
+class ShortIsBetterScorer:
+    """total = 1 - len(dense)/100; sim fixed per instance."""
+
+    def __init__(self, sim=1.0):
+        self.sim = sim
+
+    def score(self, originals, denses, recons, compute_all=True):
+        return [RewardBreakdown(total=1 - len(d) / 100, sim=self.sim, char_ratio=len(d) / len(o))
+                for o, d in zip(originals, denses)]
+
+
+@pytest.fixture
+def fake_gen(monkeypatch):
+    import heet.training.expert_iter as ei
+
+    monkeypatch.setattr(ei, "use_adapter", lambda model, name: contextlib.nullcontext(model))
+    monkeypatch.setattr(ei, "generate", lambda model, tok, task, texts, gen:
+                        [t.lower() for t in texts] if task == "compress" else list(texts))
+    monkeypatch.setattr(ei, "generate_samples", lambda model, tok, task, texts, gen, num_samples, temperature, top_p:
+                        [["sat.", ""][:num_samples] for _ in texts])
+
+
+PAIRS = [{"id": "a", "original": "The cat sat on the mat.", "dense": "cat sat mat"},
+         {"id": "b", "original": "Dogs bark loudly at night.", "dense": "dogs bark @ night"}]
+
+
+def test_run_round_trains_on_winners_and_logs(tmp_path, fake_gen):
+    from heet.training.expert_iter import run_round
+
+    cfg = Config()
+    cfg.ei.k = 2
+    trained = []
+    sel = run_round(None, None, cfg, PAIRS, ShortIsBetterScorer(), 1, tmp_path, MetricsLogger(tmp_path), trained.append)
+    assert [w["dense"] for w in sel.winners] == ["sat.", "sat."]
+    assert trained == [sel.winners]
+    row = read_jsonl(tmp_path / "metrics.jsonl")[0]
+    assert row["step"] == 1 and row["source"] == "ei" and row["ei/n_winners"] == 2 and "ei/sample_s" in row
+    recs = read_jsonl(tmp_path / "samples" / "ei_round_1.jsonl")
+    assert {r["dense"] for r in recs if r["id"] == "a"} == {"the cat sat on the mat.", "cat sat mat", "sat."}
+    assert sum(r["winner"] for r in recs) == 2 and all("total" in r for r in recs)
+
+
+def test_run_round_without_winners_does_not_train(tmp_path, fake_gen):
+    from heet.training.expert_iter import run_round
+
+    trained = []
+    sel = run_round(None, None, Config(), PAIRS, ShortIsBetterScorer(sim=0.5), 1, tmp_path,
+                    MetricsLogger(tmp_path), trained.append)
+    assert sel.winners == [] and trained == []
