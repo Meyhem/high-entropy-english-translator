@@ -45,10 +45,13 @@ def select_val_pairs(cfg: Config) -> list[dict]:
 
 class EvalCallback(TrainerCallback):
     def __init__(self, cfg: Config, task: str, tokenizer, pairs: list[dict], scorer: Scorer,
-                 logger: MetricsLogger, run_dir: Path, has_decompressor: bool):
+                 logger: MetricsLogger, run_dir: Path, has_decompressor: bool,
+                 source: str = "callback", sample_tag: str | None = None):
         self.cfg, self.task, self.tokenizer, self.pairs = cfg, task, tokenizer, pairs
         self.scorer, self.logger, self.run_dir = scorer, logger, Path(run_dir)
         self.has_decompressor = has_decompressor
+        self.source = source
+        self.sample_tag = sample_tag if sample_tag is not None else f"{task}_"
         self._warned = False
 
     def evaluate(self, model, step: int) -> dict:
@@ -81,8 +84,8 @@ class EvalCallback(TrainerCallback):
                     r["recon"] = None
             for rec, p in zip(records, self.pairs):
                 rec["id"] = p["id"]
-        self.logger.log(step, metrics, prefix=f"{self.task}/", split="val", source="callback")
-        write_samples(self.run_dir, step, records, self.cfg.eval.n_samples, self.cfg.eval.worst_k, tag=f"{self.task}_")
+        self.logger.log(step, metrics, prefix=f"{self.task}/", split="val", source=self.source)
+        write_samples(self.run_dir, step, records, self.cfg.eval.n_samples, self.cfg.eval.worst_k, tag=self.sample_tag)
         return metrics
 
     def on_step_end(self, args, state, control, model=None, **kwargs):
@@ -94,11 +97,47 @@ class EvalCallback(TrainerCallback):
             self.evaluate(model, state.global_step)
 
 
-def run_sft(cfg: Config, task: str, run: str, limit: int | None) -> Path:
+def train_adapter(model, tokenizer, cfg: Config, pairs: list[dict], task: str, run_dir: Path, *,
+                  lr: float, epochs: float, tag: str, callbacks: list | None = None) -> None:
+    """Train the model's active adapter on `pairs` for the given task."""
     from datasets import Dataset
     from trl import SFTConfig as TrlSFTConfig
     from trl import SFTTrainer
 
+    run_dir = Path(run_dir)
+    # transformers 5 reads the TensorBoard dir for trainer loss curves from this env var
+    os.environ["TENSORBOARD_LOGGING_DIR"] = str(run_dir / "tb" / f"trainer_{tag}")
+    s = cfg.sft
+    args = TrlSFTConfig(
+        output_dir=str(run_dir / f"checkpoints_{tag}"),
+        learning_rate=lr,
+        num_train_epochs=epochs,
+        per_device_train_batch_size=s.per_device_batch_size,
+        gradient_accumulation_steps=s.grad_accum,
+        lr_scheduler_type=s.scheduler,
+        warmup_steps=s.warmup_ratio,  # float in [0, 1) = ratio of total steps
+        max_length=s.max_length,
+        bf16=cfg.model.dtype == "bfloat16",
+        gradient_checkpointing=s.gradient_checkpointing,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
+        logging_steps=s.logging_steps,
+        save_steps=s.save_steps,
+        save_total_limit=2,
+        seed=s.seed,
+        report_to=["tensorboard"],
+        completion_only_loss=True,
+    )
+    trainer = SFTTrainer(
+        model=model,
+        args=args,
+        train_dataset=Dataset.from_list(build_examples(pairs, task, tokenizer)),
+        processing_class=tokenizer,
+        callbacks=callbacks or [],
+    )
+    trainer.train()
+
+
+def run_sft(cfg: Config, task: str, run: str, limit: int | None) -> Path:
     from heet.eval.evaluate import build_scorer
     from heet.models.loading import adapter_dir, check_adapter_dir, load_base, load_tokenizer, new_lora
 
@@ -129,36 +168,8 @@ def run_sft(cfg: Config, task: str, run: str, limit: int | None) -> Path:
     if val_pairs:
         callbacks.append(EvalCallback(cfg, task, tokenizer, val_pairs, build_scorer(model, tokenizer, cfg),
                                       logger, run_dir, has_decompressor))
-    # transformers 5 reads the TensorBoard dir for trainer loss curves from this env var
-    os.environ["TENSORBOARD_LOGGING_DIR"] = str(run_dir / "tb" / f"trainer_{task}")
-    s = cfg.sft
-    args = TrlSFTConfig(
-        output_dir=str(run_dir / f"checkpoints_{task}"),
-        learning_rate=s.lr,
-        num_train_epochs=s.epochs,
-        per_device_train_batch_size=s.per_device_batch_size,
-        gradient_accumulation_steps=s.grad_accum,
-        lr_scheduler_type=s.scheduler,
-        warmup_steps=s.warmup_ratio,  # float in [0, 1) = ratio of total steps
-        max_length=s.max_length,
-        bf16=cfg.model.dtype == "bfloat16",
-        gradient_checkpointing=s.gradient_checkpointing,
-        gradient_checkpointing_kwargs={"use_reentrant": False},
-        logging_steps=s.logging_steps,
-        save_steps=s.save_steps,
-        save_total_limit=2,
-        seed=s.seed,
-        report_to=["tensorboard"],
-        completion_only_loss=True,
-    )
-    trainer = SFTTrainer(
-        model=model,
-        args=args,
-        train_dataset=Dataset.from_list(build_examples(train_pairs, task, tokenizer)),
-        processing_class=tokenizer,
-        callbacks=callbacks,
-    )
-    trainer.train()
+    train_adapter(model, tokenizer, cfg, train_pairs, task, run_dir,
+                  lr=cfg.sft.lr, epochs=cfg.sft.epochs, tag=task, callbacks=callbacks)
     out_root = run_dir / "adapters"
     model.save_pretrained(str(out_root), selected_adapters=[adapter])
     tokenizer.save_pretrained(str(out_root / adapter))
