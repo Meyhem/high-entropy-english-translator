@@ -41,10 +41,21 @@ reward:
   w_char: 0.5
   w_bits: 0.25
   w_read: 0.5
-  margin: 0.6931471805599453
+  margin: 1.7
 eval:
   callback_n: 64
   n_samples: 32
   worst_k: 10
   target_char_ratio: 0.55
   target_sim: 0.90
+ei:
+  rounds: 3
+  n_per_round: 1000
+  k: 8
+  temperature: 0.8
+  top_p: 0.95
+  min_sim: 0.90
+  min_gain: 0.02
+  lr: 0.00005
+  epochs: 1.0
+  seed: 0

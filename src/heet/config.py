@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import dataclasses
-import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -106,7 +105,9 @@ class RewardConfig:
     w_char: float = 0.5
     w_bits: float = 0.25
     w_read: float = 0.5
-    margin: float = math.log(2)
+    # readability penalty fires when log(ppl_dense / ppl_orig) exceeds this;
+    # 1.7 ≈ the teacher's own level on WikiText (ln 2 penalized every rewrite)
+    margin: float = 1.7
     ref_batch_size: int = 32
 
 
@@ -117,6 +118,20 @@ class EvalConfig:
     worst_k: int = 10
     target_char_ratio: float = 0.55
     target_sim: float = 0.90
+
+
+@dataclass
+class EIConfig:
+    rounds: int = 3
+    n_per_round: int = 1000
+    k: int = 8
+    temperature: float = 0.8
+    top_p: float = 0.95
+    min_sim: float = 0.90
+    min_gain: float = 0.02
+    lr: float = 5e-5
+    epochs: float = 1.0
+    seed: int = 0
 
 
 @dataclass
@@ -131,6 +146,7 @@ class Config:
     generation: GenerationConfig = field(default_factory=GenerationConfig)
     reward: RewardConfig = field(default_factory=RewardConfig)
     eval: EvalConfig = field(default_factory=EvalConfig)
+    ei: EIConfig = field(default_factory=EIConfig)
 
 
 def _coerce(current: Any, value: Any, key: str) -> Any:

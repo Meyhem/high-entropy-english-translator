@@ -1,4 +1,3 @@
-import math
 from pathlib import Path
 
 import pytest
@@ -14,7 +13,7 @@ def test_defaults_match_spec():
     assert (c.filter.min_ratio, c.filter.max_ratio) == (0.30, 0.80)
     assert c.lora.r == 16 and c.lora.alpha == 32
     assert c.reward.w_sim == 1.0 and c.reward.w_char == 0.5
-    assert math.isclose(c.reward.margin, math.log(2))
+    assert c.reward.margin == 1.7
     assert c.eval.target_char_ratio == 0.55
 
 
@@ -47,3 +46,14 @@ def test_dump_roundtrip(tmp_path: Path):
 def test_default_yaml_loads():
     c = load_config(Path(__file__).parent.parent / "configs" / "default.yaml")
     assert c == Config()
+
+
+def test_ei_defaults_and_override(tmp_path: Path):
+    c = Config()
+    e = c.ei
+    assert (e.rounds, e.n_per_round, e.k) == (3, 1000, 8)
+    assert (e.temperature, e.top_p, e.min_sim, e.min_gain) == (0.8, 0.95, 0.90, 0.02)
+    assert (e.lr, e.epochs, e.seed) == (5e-5, 1.0, 0)
+    c2 = load_config("configs/default.yaml", ["ei.k=4", "ei.min_gain=-10"])
+    assert c2.ei.k == 4 and c2.ei.min_gain == -10.0 and isinstance(c2.ei.min_gain, float)
+    assert c2.reward.margin == 1.7
